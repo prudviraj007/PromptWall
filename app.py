@@ -1,18 +1,15 @@
 import os
-import re
-import psycopg2
-import psycopg2.extras
 from datetime import datetime
-from flask import Flask, request, redirect, url_for, render_template_string, abort
+from flask import Flask, request, redirect, url_for, render_template_string
+import psycopg
+from psycopg.rows import dict_row
 
 app = Flask(__name__)
 
 def _with_sslmode_require(url: str) -> str:
-    # Ensure ?sslmode=require or &sslmode=require is present
     if "sslmode=" in url:
         return url
-    sep = "&" if "?" in url else "?"
-    return f"{url}{sep}sslmode=require"
+    return f"{url}{'&' if '?' in url else '?'}sslmode=require"
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 if not DATABASE_URL:
@@ -20,7 +17,7 @@ if not DATABASE_URL:
 DATABASE_URL = _with_sslmode_require(DATABASE_URL)
 
 def get_conn():
-    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 def init_db():
     with get_conn() as conn, conn.cursor() as cur:
@@ -73,7 +70,7 @@ TEMPLATE = """
   <body>
     <div class="wrap">
       <h1>Workshop Submissions</h1>
-      <p>Submit name, prompt, and result; paste a screenshot into the box below or provide an image URL; append <code>?w=TEAM</code> to segment groups.</p>
+      <p>Submit name, prompt, and result; paste a screenshot in the box or provide an image URL; append <code>?w=TEAM</code> to segment groups.</p>
 
       <form method="post" action="{{ url_for('submit') }}">
         <input type="hidden" name="workshop" value="{{ workshop or '' }}" />
@@ -85,7 +82,7 @@ TEMPLATE = """
           <div>
             <div class="muted">Paste Screenshot</div>
             <div id="pastezone" class="pastezone" tabindex="0">
-              Click here and press Ctrl+V/Cmd+V to paste an image, or drop an image file.
+              Click and press Ctrl+V/Cmd+V to paste an image, or drop an image file.
             </div>
             <input type="hidden" id="image_data_url" name="image_data_url" />
             <img id="image_preview" class="thread-image" style="display:none" alt="pasted screenshot preview" draggable="false" />
@@ -209,7 +206,9 @@ TEMPLATE = """
 """
 
 def fetch_submissions(workshop=None, limit=100):
-    q = """
+    where = "WHERE workshop = %s" if workshop else ""
+    params = (workshop, limit) if workshop else (limit,)
+    q = f"""
         SELECT name, prompt, result, workshop,
                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') as created_at,
                image_url, image_data_url
@@ -218,10 +217,8 @@ def fetch_submissions(workshop=None, limit=100):
         ORDER BY id DESC
         LIMIT %s
     """
-    where = "WHERE workshop = %s" if workshop else ""
-    params = (workshop, limit) if workshop else (limit,)
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(q.format(where=where), params)
+        cur.execute(q, params)
         return cur.fetchall()
 
 @app.route("/", methods=["GET"])
@@ -260,5 +257,4 @@ def submit():
     return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
 
 if __name__ == "__main__":
-    # Local dev server; Render will use gunicorn app:app
     app.run(host="127.0.0.1", port=8000, debug=True)
