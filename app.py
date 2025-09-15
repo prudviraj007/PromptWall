@@ -53,9 +53,11 @@ TEMPLATE = """
       form { display: grid; gap: 12px; margin-top: 12px; }
       input, textarea { padding: 10px; font-size: 16px; width: 100%; box-sizing: border-box; border: 1px solid var(--card-border); border-radius: 6px; background: #fff; }
       button { padding: 10px 14px; font-size: 16px; background: #111; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+      .btn-danger { background: #b91c1c; }
+      .row { display: flex; gap: 8px; align-items: center; }
       .card { display: grid; grid-template-columns: 6px 1fr; gap: 12px; border: 1px solid var(--card-border); border-radius: 10px; background: var(--card-bg); padding: 12px; }
       .bar { background: #e5e7eb; border-radius: 4px; }
-      .topline { font-weight: 600; display: flex; gap: 8px; align-items: center; }
+      .topline { font-weight: 600; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
       .meta { color: var(--muted); font-weight: 400; font-size: 12px; }
       .muted { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
       pre { white-space: pre-wrap; margin: 0; }
@@ -104,8 +106,12 @@ TEMPLATE = """
               <div class="bar"></div>
               <div>
                 <div class="topline">
-                  <span>{{ s['name'] }}</span>
-                  <span class="meta">• {{ s['created_at'] }}{% if s['workshop'] %} • {{ s['workshop'] }}{% endif %}</span>
+                  <span>{{ s['name'] }} <span class="meta">• {{ s['created_at'] }}{% if s['workshop'] %} • {{ s['workshop'] }}{% endif %}</span></span>
+                  <form method="post" action="{{ url_for('delete') }}" onsubmit="return confirm('Delete this post?');" class="row" style="margin:0">
+                    <input type="hidden" name="id" value="{{ s['id'] }}" />
+                    <input type="hidden" name="workshop" value="{{ workshop or s['workshop'] or '' }}" />
+                    <button type="submit" class="btn-danger">Delete</button>
+                  </form>
                 </div>
 
                 <div style="margin-top:10px">
@@ -209,7 +215,7 @@ def fetch_submissions(workshop=None, limit=100):
     where = "WHERE workshop = %s" if workshop else ""
     params = (workshop, limit) if workshop else (limit,)
     q = f"""
-        SELECT name, prompt, result, workshop,
+        SELECT id, name, prompt, result, workshop,
                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') as created_at,
                image_url, image_data_url
         FROM submissions
@@ -254,6 +260,19 @@ def submit():
         )
         conn.commit()
 
+    return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
+
+@app.route("/delete", methods=["POST"])
+def delete():
+    sid = (request.form.get("id") or "").strip()
+    workshop = (request.form.get("workshop") or None)
+    try:
+        sid_int = int(sid)
+    except ValueError:
+        return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM submissions WHERE id = %s", (sid_int,))
+        conn.commit()
     return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
 
 if __name__ == "__main__":
