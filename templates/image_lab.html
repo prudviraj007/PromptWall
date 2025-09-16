@@ -26,7 +26,6 @@
     <div class="wrap">
       <h1>Image Lab</h1>
       <div class="muted">Provide a reference image and add edit prompts to generate variations using Gemini; leave the key blank to use an environment key.</div>
-
       <form class="panel" method="post" action="{{ url_for('image_lab_generate') }}" enctype="multipart/form-data">
         <div class="grid grid-2">
           <div>
@@ -51,14 +50,12 @@
             </div>
           </div>
         </div>
-
         <div class="grid grid-2" style="margin-top:14px">
           <div>
             <div class="muted">Reference image (PNG/JPG); leave empty to use text-to-image</div>
             <input type="file" name="reference" accept="image/*" id="refInput" />
             <img id="refPreview" class="thumb" style="display:none;margin-top:8px" alt="reference preview" />
           </div>
-
           <div>
             <div class="muted">Add edit prompts</div>
             <div class="row">
@@ -70,13 +67,11 @@
             <div class="muted" style="margin-top:8px">Prompts are sent one-by-one with the image to produce edited variants.</div>
           </div>
         </div>
-
         <div style="margin-top:16px">
           <button type="submit">Generate</button>
           <a href="{{ url_for('index') }}" class="pill">Back to submissions</a>
         </div>
       </form>
-
       {% if results is not none %}
       <h2 style="margin-top:24px">Results</h2>
       <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));">
@@ -97,25 +92,22 @@
       </div>
       {% endif %}
     </div>
-
     <script>
       // Reference image preview
       const refInput = document.getElementById('refInput');
       const refPreview = document.getElementById('refPreview');
       refInput?.addEventListener('change', () => {
-        const f = refInput.files?.;
+        const f = refInput.files?.[0];
         if (!f) { refPreview.style.display='none'; return; }
         const url = URL.createObjectURL(f);
         refPreview.src = url;
         refPreview.style.display = 'block';
       });
-
       // Prompt list state
       const input = document.getElementById('promptInput');
       const addBtn = document.getElementById('addPrompt');
       const list = document.getElementById('promptList');
       const hidden = document.getElementById('prompts_json');
-
       const prompts = [];
       function render() {
         hidden.value = JSON.stringify(prompts);
