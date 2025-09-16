@@ -1,63 +1,57 @@
-import sqlite3
+import os
 from datetime import datetime
 from flask import Flask, request, redirect, url_for, render_template
+import psycopg
+from psycopg.rows import dict_row
 
-app = Flask(__name__, static_folder="static", template_folder="templates")
-app.config["TEMPLATES_AUTO_RELOAD"] = True
+app = Flask(__name__)
 
-DB_PATH = "submissions.db"
+def _with_sslmode_require(url: str) -> str:
+    if "sslmode=" in url:
+        return url
+    return f"{url}{'&' if '?' in url else '?'}sslmode=require"
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set")
+DATABASE_URL = _with_sslmode_require(DATABASE_URL)
+
+def get_conn():
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-
-    # Drop old tables to start fresh with a new schema.
-    c.execute("DROP TABLE IF EXISTS images")
-    c.execute("DROP TABLE IF EXISTS submissions")
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS submissions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        result TEXT NOT NULL,
-        workshop TEXT,
-        created_at TEXT NOT NULL
-    )
-    """)
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS images (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        submission_id INTEGER NOT NULL,
-        image_data_url TEXT,
-        image_url TEXT,
-        FOREIGN KEY(submission_id) REFERENCES submissions(id) ON DELETE CASCADE
-    )
-    """)
-    conn.commit()
-    conn.close()
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS submissions (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            result TEXT NOT NULL,
+            workshop TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            image_url TEXT,
+            image_data_url TEXT
+        );
+        """)
+        conn.commit()
 
 init_db()
 
 def fetch_submissions(workshop=None, limit=100):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-
-    if workshop:
-        c.execute("""SELECT * FROM submissions WHERE workshop=? ORDER BY id DESC LIMIT ?""", (workshop, limit))
-    else:
-        c.execute("""SELECT * FROM submissions ORDER BY id DESC LIMIT ?""", (limit,))
-
-    submissions = [dict(r) for r in c.fetchall()]
-
-    for submission in submissions:
-        c.execute("""SELECT * FROM images WHERE submission_id=? ORDER BY id ASC""", (submission['id'],))
-        submission['images'] = [dict(r) for r in c.fetchall()]
-    
-    conn.close()
-    return submissions
+    where = "WHERE workshop = %s" if workshop else ""
+    params = (workshop, limit) if workshop else (limit,)
+    q = f"""
+        SELECT id, name, prompt, result, workshop,
+               to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') as created_at,
+               image_url, image_data_url
+        FROM submissions
+        {where}
+        ORDER BY id DESC
+        LIMIT %s
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(q, params)
+        return cur.fetchall()
 
 @app.route("/", methods=["GET"])
 def index():
@@ -71,32 +65,27 @@ def submit():
     prompt = (request.form.get("prompt") or "")[:5000]
     result = (request.form.get("result") or "")[:10000]
     workshop = (request.form.get("workshop") or None)
+    image_url = (request.form.get("image_url") or "").strip() or None
+    image_data_url = (request.form.get("image_data_url") or "").strip() or None
+
+    if image_data_url and not image_data_url.startswith("data:image/"):
+        image_data_url = None
+    if image_data_url and len(image_data_url) > 2_000_000:
+        image_data_url = None
 
     if not name or not prompt or not result:
         return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    c.execute("""INSERT INTO submissions (name, prompt, result, workshop, created_at)
-                VALUES (?, ?, ?, ?, ?)""",
-              (name, prompt, result, workshop, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-    
-    submission_id = c.lastrowid
-    
-    image_data_urls = request.form.getlist("image_data_url")
-    image_url = request.form.get("image_url", "").strip() or None
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO submissions (name, prompt, result, workshop, image_url, image_data_url)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (name, prompt, result, workshop, image_url, image_data_url),
+        )
+        conn.commit()
 
-    if image_url:
-        c.execute("""INSERT INTO images (submission_id, image_url) VALUES (?, ?)""", (submission_id, image_url))
-    
-    for data_url in image_data_urls:
-        data_url = data_url.strip()
-        if data_url and data_url.startswith("data:image/") and len(data_url) <= 2_000_000:
-            c.execute("""INSERT INTO images (submission_id, image_data_url) VALUES (?, ?)""", (submission_id, data_url))
-
-    conn.commit()
-    conn.close()
     return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
 
 @app.route("/delete", methods=["POST"])
@@ -107,13 +96,9 @@ def delete():
         sid_int = int(sid)
     except ValueError:
         return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
-    
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM submissions WHERE id = ?", (sid_int,))
-    conn.commit()
-    conn.close()
-    
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM submissions WHERE id = %s", (sid_int,))
+        conn.commit()
     return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
 
 if __name__ == "__main__":
