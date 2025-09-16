@@ -12,9 +12,6 @@ from google.genai import types
 
 app = Flask(__name__)
 
-# -----------------------------
-# Database helpers and schema
-# -----------------------------
 def _with_sslmode_require(url: str) -> str:
     if "sslmode=" in url:
         return url
@@ -64,9 +61,6 @@ def fetch_submissions(workshop=None, limit=100):
         cur.execute(q, params)
         return cur.fetchall()
 
-# -----------------------------
-# Core pages
-# -----------------------------
 @app.route("/", methods=["GET"])
 def index():
     workshop = request.args.get("w")
@@ -81,12 +75,14 @@ def submit():
     workshop = (request.form.get("workshop") or None)
     image_url = (request.form.get("image_url") or "").strip() or None
     image_data_url = (request.form.get("image_data_url") or "").strip() or None
+
     if image_data_url and not image_data_url.startswith("data:image/"):
         image_data_url = None
     if image_data_url and len(image_data_url) > 2_000_000:
         image_data_url = None
     if not name or not prompt or not result:
         return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
+
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -106,14 +102,12 @@ def delete():
         sid_int = int(sid)
     except ValueError:
         return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
+
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM submissions WHERE id = %s", (sid_int,))
         conn.commit()
     return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
 
-# -----------------------------
-# Image Lab (Gemini only)
-# -----------------------------
 @app.route("/image-lab", methods=["GET"])
 def image_lab():
     defaults = {
@@ -130,7 +124,7 @@ def _data_url_from_bytes(img_bytes: bytes, mime: str = "image/png") -> str:
 @app.route("/image-lab/generate", methods=["POST"])
 def image_lab_generate():
     form_api_key = (request.form.get("api_key") or "").strip()
-    model = "gemini-2.5-flash-image-preview"  # Fixed to Gemini-only
+    model = "gemini-2.5-flash-image-preview"
     count = max(1, min(int(request.form.get("count") or 1), 4))
     prompts_json = request.form.get("prompts_json") or "[]"
 
@@ -150,8 +144,10 @@ def image_lab_generate():
     for prompt in prompts:
         for _ in range(count):
             try:
-                contents = [ref_image] if ref_image else []
-                contents.append(prompt)
+                contents = [prompt]
+                if ref_image:
+                    contents.append(ref_image)
+
                 resp = client.models.generate_content(
                     model=model,
                     contents=contents,
@@ -159,6 +155,7 @@ def image_lab_generate():
                         response_modalities=[types.Modality.IMAGE]
                     ),
                 )
+
                 added = False
                 for part in resp.candidates[0].content.parts:
                     if getattr(part, "inline_data", None):
@@ -175,6 +172,7 @@ def image_lab_generate():
                         "prompt": prompt,
                         "error": "No image returned; try refining the prompt.",
                     })
+
             except Exception as e:
                 results.append({"prompt": prompt, "error": str(e)})
 
@@ -185,8 +183,5 @@ def image_lab_generate():
     }
     return render_template("image_lab.html", results=results, defaults=defaults)
 
-# -----------------------------
-# Run locally
-# -----------------------------
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=8000, debug=True)
