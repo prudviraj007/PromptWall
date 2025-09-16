@@ -63,14 +63,16 @@
         text-align: center;
         padding: 80px 0;
       }
+      /* Modified neon title styles */
       h1.neon {
         margin: 0 0 8px;
         font-weight: 800;
         letter-spacing: 2px;
         font-size: clamp(2rem, 5vw, 4rem);
-        color: #fff;
-        text-shadow: 0 0 8px #fff, 0 0 20px #fff, 0 0 30px var(--neon),
-          0 0 60px var(--neon);
+        color: #e0f7fa; /* Slightly reduced base brightness */
+        text-shadow: 0 0 5px #e0f7fa, 0 0 15px #e0f7fa, 0 0 25px var(--neon),
+          0 0 50px var(--neon); /* Reduced shadow intensity */
+        animation: subtleNeonPulse 2s infinite alternate ease-in-out; /* Added animation */
       }
       p.sub {
         color: var(--muted);
@@ -243,6 +245,22 @@
         margin-top: 12px;
         border-radius: 12px;
         border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      /* New Keyframes Animation for the neon pulse */
+      @keyframes subtleNeonPulse {
+        0% {
+          text-shadow: 0 0 5px #e0f7fa, 0 0 15px #e0f7fa, 0 0 25px var(--neon),
+            0 0 50px var(--neon);
+        }
+        50% {
+          text-shadow: 0 0 8px #e0f7fa, 0 0 20px #e0f7fa, 0 0 35px var(--neon),
+            0 0 70px var(--neon);
+        }
+        100% {
+          text-shadow: 0 0 5px #e0f7fa, 0 0 15px #e0f7fa, 0 0 25px var(--neon),
+            0 0 50px var(--neon);
+        }
       }
     </style>
   </head>
