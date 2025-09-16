@@ -3,16 +3,10 @@ import json
 import base64
 from io import BytesIO
 from datetime import datetime
-
 from flask import Flask, request, redirect, url_for, render_template
 import psycopg
 from psycopg.rows import dict_row
-
-# Optional image libs for image editing/generation
 from PIL import Image
-
-# Google Gen AI SDK (Gemini + Imagen)
-# pip install google-genai
 from google import genai
 from google.genai import types
 
@@ -87,15 +81,12 @@ def submit():
     workshop = (request.form.get("workshop") or None)
     image_url = (request.form.get("image_url") or "").strip() or None
     image_data_url = (request.form.get("image_data_url") or "").strip() or None
-
     if image_data_url and not image_data_url.startswith("data:image/"):
         image_data_url = None
     if image_data_url and len(image_data_url) > 2_000_000:
         image_data_url = None
-
     if not name or not prompt or not result:
         return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
-
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -105,7 +96,6 @@ def submit():
             (name, prompt, result, workshop, image_url, image_data_url),
         )
         conn.commit()
-
     return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
 
 @app.route("/delete", methods=["POST"])
@@ -116,21 +106,18 @@ def delete():
         sid_int = int(sid)
     except ValueError:
         return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
-
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM submissions WHERE id = %s", (sid_int,))
         conn.commit()
-
     return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
 
 # -----------------------------
-# Image Lab (Gemini + Imagen)
+# Image Lab (Gemini only)
 # -----------------------------
 @app.route("/image-lab", methods=["GET"])
 def image_lab():
-    # Defaults control UI selection on first load
     defaults = {
-        "model": "gemini-2.5-flash-image-preview",  # image editing + text-to-image
+        "model": "gemini-2.5-flash-image-preview",
         "count": 2,
         "api_key": "",
     }
@@ -142,81 +129,52 @@ def _data_url_from_bytes(img_bytes: bytes, mime: str = "image/png") -> str:
 
 @app.route("/image-lab/generate", methods=["POST"])
 def image_lab_generate():
-    # Visible API key placeholder from form; if empty, SDK will use env key
     form_api_key = (request.form.get("api_key") or "").strip()
-    model = (request.form.get("model") or "gemini-2.5-flash-image-preview").strip()
+    model = "gemini-2.5-flash-image-preview"  # Fixed to Gemini-only
     count = max(1, min(int(request.form.get("count") or 1), 4))
-
-    # Prompts come as a JSON array built in the UI
     prompts_json = request.form.get("prompts_json") or "[]"
+
     try:
         prompts = [p.strip() for p in json.loads(prompts_json) if p and p.strip()]
     except Exception:
         prompts = []
 
-    # Optional reference image (enables image editing)
     ref_file = request.files.get("reference")
     ref_image = None
     if ref_file and ref_file.filename:
         ref_image = Image.open(ref_file.stream).convert("RGB")
 
-    # Create client; if no API key passed, the SDK reads env (e.g., GEMINI_API_KEY or GOOGLE_API_KEY)
     client = genai.Client(api_key=form_api_key) if form_api_key else genai.Client()
+    results = []
 
-    results = []  # list of {prompt, data_url | error}
-
-    if ref_image:
-        # Image editing with Gemini 2.5 Flash Image Preview: send [image, instruction] and parse inline image parts
-        # Official pattern: generate_content + response parts with inline_data bytes
-        for prompt in prompts:
-            for _ in range(count):
-                try:
-                    resp = client.models.generate_content(
-                        model=model,  # "gemini-2.5-flash-image-preview"
-                        contents=[ref_image, prompt],
-                        config=types.GenerateContentConfig(
-                            response_modalities=[types.Modality.IMAGE]
-                        ),
-                    )
-                    # Extract first returned image part
-                    added = False
-                    for part in resp.candidates.content.parts:
-                        if getattr(part, "inline_data", None):
-                            mime = getattr(part.inline_data, "mime_type", "image/png")
-                            img_bytes = part.inline_data.data
-                            results.append(
-                                {
-                                    "prompt": prompt,
-                                    "data_url": _data_url_from_bytes(img_bytes, mime),
-                                }
-                            )
-                            added = True
-                    if not added:
-                        results.append(
-                            {
-                                "prompt": prompt,
-                                "error": "No image returned; try refining the prompt.",
-                            }
-                        )
-                except Exception as e:
-                    results.append({"prompt": prompt, "error": str(e)})
-    else:
-        # Text-to-image without a reference uses Imagen
-        for prompt in prompts:
+    for prompt in prompts:
+        for _ in range(count):
             try:
-                resp = client.models.generate_images(
-                    model="imagen-4.0-generate-001",
-                    prompt=prompt,
-                    config=types.GenerateImagesConfig(number_of_images=count),
+                contents = [ref_image] if ref_image else []
+                contents.append(prompt)
+                resp = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        response_modalities=[types.Modality.IMAGE]
+                    ),
                 )
-                for gi in resp.generated_images:
-                    img_bytes = gi.image.image_bytes
-                    results.append(
-                        {
+                added = False
+                for part in resp.candidates[0].content.parts:
+                    if getattr(part, "inline_data", None):
+                        mime = getattr(part.inline_data, "mime_type", "image/png")
+                        img_bytes = part.inline_data.data
+                        results.append({
                             "prompt": prompt,
-                            "data_url": _data_url_from_bytes(img_bytes, "image/png"),
-                        }
-                    )
+                            "data_url": _data_url_from_bytes(img_bytes, mime),
+                        })
+                        added = True
+                        break
+                if not added:
+                    results.append({
+                        "prompt": prompt,
+                        "error": "No image returned; try refining the prompt.",
+                    })
             except Exception as e:
                 results.append({"prompt": prompt, "error": str(e)})
 
@@ -228,8 +186,7 @@ def image_lab_generate():
     return render_template("image_lab.html", results=results, defaults=defaults)
 
 # -----------------------------
-# Dev server
+# Run locally
 # -----------------------------
 if __name__ == "__main__":
-    # Run locally
     app.run(host="127.0.0.1", port=8000, debug=True)
