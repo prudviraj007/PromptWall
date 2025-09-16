@@ -5,7 +5,6 @@
     <title>Image Lab</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
-      /* Reuse core styles from index.html for consistency */
       :root { --ink:#e6f7ff; --muted:#9fb3c8; --neon:#00f5ff; --bg1:#03081e; --card:rgba(11,16,38,.6); --border:rgba(255,255,255,.16); }
       body { margin:0; background:var(--bg1); color:var(--ink); font-family: ui-sans-serif, system-ui, Segoe UI, Roboto, Arial; }
       .wrap { max-width: 1080px; margin: 32px auto; padding: 0 16px; }
@@ -35,12 +34,9 @@
           <div class="row">
             <div style="flex:1">
               <label class="muted">Model</label>
-              <select name="model">
-                <option value="gemini-2.5-flash-image-preview" {{ 'selected' if defaults.get('model')=='gemini-2.5-flash-image-preview' else '' }}>
-                  gemini-2.5-flash-image-preview
-                </option>
-                <option value="imagen-4.0-generate-001" {{ 'selected' if defaults.get('model')=='imagen-4.0-generate-001' else '' }}>
-                  imagen-4.0-generate-001 (text→image)
+              <select name="model" disabled>
+                <option value="gemini-2.5-flash-image-preview" selected>
+                  gemini-2.5-flash-image-preview (text→image + image editing)
                 </option>
               </select>
             </div>
@@ -72,6 +68,7 @@
           <a href="{{ url_for('index') }}" class="pill">Back to submissions</a>
         </div>
       </form>
+
       {% if results is not none %}
       <h2 style="margin-top:24px">Results</h2>
       <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));">
