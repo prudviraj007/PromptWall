@@ -1,15 +1,10 @@
 import os
+from datetime import datetime
 from flask import Flask, request, redirect, url_for, render_template
 import psycopg
 from psycopg.rows import dict_row
-from flask_wtf.csrf import CSRFProtect
 
 app = Flask(__name__)
-
-# CSRF requires a SECRET_KEY; set via env in production
-# e.g., export SECRET_KEY="a-strong-random-secret"
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-change-me")
-CSRFProtect(app)  # Global CSRF protection for POST/PUT/PATCH/DELETE
 
 def _with_sslmode_require(url: str) -> str:
     if "sslmode=" in url:
@@ -22,7 +17,6 @@ if not DATABASE_URL:
 DATABASE_URL = _with_sslmode_require(DATABASE_URL)
 
 def get_conn():
-    # psycopg3 dict_row returns rows as dicts: row["column"] access
     return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 def init_db():
@@ -74,7 +68,6 @@ def submit():
     image_url = (request.form.get("image_url") or "").strip() or None
     image_data_url = (request.form.get("image_data_url") or "").strip() or None
 
-    # Basic image data URL validation
     if image_data_url and not image_data_url.startswith("data:image/"):
         image_data_url = None
     if image_data_url and len(image_data_url) > 2_000_000:
@@ -103,13 +96,10 @@ def delete():
         sid_int = int(sid)
     except ValueError:
         return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
-
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM submissions WHERE id = %s", (sid_int,))
         conn.commit()
-
     return redirect(url_for("index", w=workshop) if workshop else url_for("index"))
 
 if __name__ == "__main__":
-    # Run locally; set host/port as needed
     app.run(host="127.0.0.1", port=8000, debug=True)
