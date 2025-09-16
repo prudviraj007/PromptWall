@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Image Lab</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      /* Reuse core styles from index.html for consistency */
+      :root { --ink:#e6f7ff; --muted:#9fb3c8; --neon:#00f5ff; --bg1:#03081e; --card:rgba(11,16,38,.6); --border:rgba(255,255,255,.16); }
+      body { margin:0; background:var(--bg1); color:var(--ink); font-family: ui-sans-serif, system-ui, Segoe UI, Roboto, Arial; }
+      .wrap { max-width: 1080px; margin: 32px auto; padding: 0 16px; }
+      .panel { border:1px solid var(--border); border-radius:18px; background:var(--card); backdrop-filter: blur(10px); padding:20px; }
+      .grid { display:grid; gap:18px; }
+      @media (min-width: 980px) { .grid-2 { grid-template-columns: 1fr 1fr; } }
+      input, textarea, select { width:100%; padding:12px; border-radius:12px; border:1px solid var(--border); background:rgba(8,14,32,.45); color:var(--ink); }
+      button { padding:10px 16px; border:none; border-radius:999px; background:linear-gradient(120deg,#c7f5ff,#8ae2ff); color:#081030; font-weight:700; cursor:pointer; }
+      .muted { color: var(--muted); font-size:13px; }
+      .thumb { width:100%; max-height:420px; object-fit:contain; border-radius:12px; border:1px solid rgba(255,255,255,.1); background:#0002; }
+      .row { display:flex; gap:10px; align-items:center; }
+      .pill { font-size:12px; padding:4px 8px; border-radius:999px; background:#ffffff12; border:1px solid #ffffff1f; }
+      .card { border:1px solid var(--border); border-radius:18px; padding:16px; background:var(--card); }
+      .flex { display:flex; gap:12px; flex-wrap:wrap; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Image Lab</h1>
+      <div class="muted">Provide a reference image and add edit prompts to generate variations using Gemini; leave the key blank to use an environment key.</div>
+
+      <form class="panel" method="post" action="{{ url_for('image_lab_generate') }}" enctype="multipart/form-data">
+        <div class="grid grid-2">
+          <div>
+            <label class="muted">Gemini API Key (placeholder)</label>
+            <input name="api_key" placeholder="Paste API key here (or leave empty to use env)" value="{{ defaults.get('api_key','') }}" />
+          </div>
+          <div class="row">
+            <div style="flex:1">
+              <label class="muted">Model</label>
+              <select name="model">
+                <option value="gemini-2.5-flash-image-preview" {{ 'selected' if defaults.get('model')=='gemini-2.5-flash-image-preview' else '' }}>
+                  gemini-2.5-flash-image-preview
+                </option>
+                <option value="imagen-4.0-generate-001" {{ 'selected' if defaults.get('model')=='imagen-4.0-generate-001' else '' }}>
+                  imagen-4.0-generate-001 (text→image)
+                </option>
+              </select>
+            </div>
+            <div style="width:160px">
+              <label class="muted">Images per prompt</label>
+              <input type="number" min="1" max="4" name="count" value="{{ defaults.get('count',2) }}" />
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-2" style="margin-top:14px">
+          <div>
+            <div class="muted">Reference image (PNG/JPG); leave empty to use text-to-image</div>
+            <input type="file" name="reference" accept="image/*" id="refInput" />
+            <img id="refPreview" class="thumb" style="display:none;margin-top:8px" alt="reference preview" />
+          </div>
+
+          <div>
+            <div class="muted">Add edit prompts</div>
+            <div class="row">
+              <input id="promptInput" placeholder="e.g., swap burger and fries with sushi" />
+              <button type="button" id="addPrompt">Add</button>
+            </div>
+            <div id="promptList" class="flex" style="margin-top:8px"></div>
+            <input type="hidden" id="prompts_json" name="prompts_json" />
+            <div class="muted" style="margin-top:8px">Prompts are sent one-by-one with the image to produce edited variants.</div>
+          </div>
+        </div>
+
+        <div style="margin-top:16px">
+          <button type="submit">Generate</button>
+          <a href="{{ url_for('index') }}" class="pill">Back to submissions</a>
+        </div>
+      </form>
+
+      {% if results is not none %}
+      <h2 style="margin-top:24px">Results</h2>
+      <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));">
+        {% for r in results %}
+          <div class="card">
+            <div class="muted">Prompt</div>
+            <div style="font-size:13px">{{ r.get('prompt','') }}</div>
+            {% if r.get('error') %}
+              <div class="muted" style="color:#ff9aa2">Error: {{ r['error'] }}</div>
+            {% else %}
+              <img src="{{ r['data_url'] }}" class="thumb" alt="generated" />
+              <div class="row" style="margin-top:8px">
+                <a download="generated.png" href="{{ r['data_url'] }}" class="pill">Download</a>
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    <script>
+      // Reference image preview
+      const refInput = document.getElementById('refInput');
+      const refPreview = document.getElementById('refPreview');
+      refInput?.addEventListener('change', () => {
+        const f = refInput.files?.;
+        if (!f) { refPreview.style.display='none'; return; }
+        const url = URL.createObjectURL(f);
+        refPreview.src = url;
+        refPreview.style.display = 'block';
+      });
+
+      // Prompt list state
+      const input = document.getElementById('promptInput');
+      const addBtn = document.getElementById('addPrompt');
+      const list = document.getElementById('promptList');
+      const hidden = document.getElementById('prompts_json');
+
+      const prompts = [];
+      function render() {
+        hidden.value = JSON.stringify(prompts);
+        list.innerHTML = '';
+        for (const [i, p] of prompts.entries()) {
+          const pill = document.createElement('div');
+          pill.className = 'pill';
+          pill.textContent = p + '  ✕';
+          pill.style.cursor = 'pointer';
+          pill.onclick = () => { prompts.splice(i,1); render(); };
+          list.appendChild(pill);
+        }
+      }
+      addBtn.onclick = () => {
+        const v = (input.value || '').trim();
+        if (!v) return;
+        prompts.push(v);
+        input.value = '';
+        render();
+      };
+      render();
+    </script>
+  </body>
+</html>
